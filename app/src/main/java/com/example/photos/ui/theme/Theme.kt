@@ -33,6 +33,7 @@ class Palette(
     val titleFont: FontFamily,
 )
 
+// Color is a value class, so it can't be a vararg: use explicit overloads.
 private fun vertical(a: Color, b: Color): Brush = Brush.verticalGradient(listOf(a, b))
 private fun vertical(a: Color, b: Color, c: Color): Brush = Brush.verticalGradient(listOf(a, b, c))
 
