@@ -5,6 +5,8 @@ package com.example.photos.ui
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.WindowManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -257,6 +259,36 @@ private fun VaultContent(vm: GalleryViewModel, onBack: () -> Unit) {
     var confirmDelete by remember { mutableStateOf(false) }
     val picked = items.filter { it.id in selected }
 
+    // Encrypted backups: portable between phones and survive uninstall / reinstall.
+    var backupDialog by remember { mutableStateOf<Boolean?>(null) } // true = export, false = import
+    var backupPassword by remember { mutableStateOf("") }
+    val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) {
+            scope.launch {
+                vm.toast("Exporting…")
+                val n = vault.exportAll(items, tree, backupPassword)
+                backupPassword = ""
+                vm.toast("Exported $n of ${items.size} items")
+            }
+        }
+    }
+    val filesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                vm.toast("Importing…")
+                val r = vault.importBackups(uris, backupPassword)
+                backupPassword = ""
+                vm.toast(
+                    buildString {
+                        append("Imported ${r.imported}")
+                        if (r.wrongPassword > 0) append(" · ${r.wrongPassword} wrong password")
+                        if (r.invalid > 0) append(" · ${r.invalid} not valid")
+                    },
+                )
+            }
+        }
+    }
+
     Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (selected.isEmpty()) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
@@ -266,6 +298,14 @@ private fun VaultContent(vm: GalleryViewModel, onBack: () -> Unit) {
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Lock now") }, onClick = { menu = false; vault.lock() })
                     DropdownMenuItem(text = { Text("Change password") }, onClick = { menu = false; changePw = true })
+                    DropdownMenuItem(
+                        text = { Text("Export encrypted backup…") },
+                        onClick = { menu = false; if (items.isEmpty()) vm.toast("Nothing to export") else backupDialog = true },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Import backup…") },
+                        onClick = { menu = false; backupDialog = false },
+                    )
                     if (biometricAvailable(context.findActivity() as? FragmentActivity)) {
                         DropdownMenuItem(
                             text = { Text(if (bioOn) "Turn off biometric unlock" else "Turn on biometric unlock") },
@@ -357,6 +397,13 @@ private fun VaultContent(vm: GalleryViewModel, onBack: () -> Unit) {
         )
     }
     if (changePw) ChangePasswordDialog(vault) { changePw = false }
+    backupDialog?.let { export ->
+        BackupPasswordDialog(export = export, onDismiss = { backupDialog = null }) { pw ->
+            backupPassword = pw
+            backupDialog = null
+            if (export) treeLauncher.launch(null) else filesLauncher.launch(arrayOf("*/*"))
+        }
+    }
 }
 
 @Composable
@@ -488,3 +535,43 @@ private fun VaultItem.toMedia(file: File): Media = Media(
     relativePath = "",
     folderName = "",
 )
+
+/**
+ * Backup password prompt. The backup password is independent of the locked-folder password:
+ * you only need it when importing, so each phone can keep its own locked-folder password.
+ */
+@Composable
+private fun BackupPasswordDialog(export: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var pw by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val valid = pw.length >= 6 && (!export || pw == confirm)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (export) "Export encrypted backup" else "Import backup") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (export) {
+                        "Choose a backup password (6+ characters). You will need it to restore these files on any phone. " +
+                            "It does not have to match your locked-folder password."
+                    } else {
+                        "Enter the password that was used when the backup was exported."
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    pw, { pw = it }, label = { Text("Backup password") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                if (export) {
+                    OutlinedTextField(
+                        confirm, { confirm = it }, label = { Text("Confirm password") }, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = valid, onClick = { onConfirm(pw) }) { Text(if (export) "Choose folder" else "Choose files") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}

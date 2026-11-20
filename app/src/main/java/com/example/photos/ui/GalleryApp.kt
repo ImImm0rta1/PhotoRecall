@@ -69,7 +69,7 @@ import com.example.photos.data.Source
 import com.example.photos.ui.theme.LocalPalette
 import com.example.photos.util.hasMediaPermission
 import com.example.photos.util.mediaPermissions
-import com.example.photos.util.shareMedia
+import com.example.photos.util.shareUris
 
 /** Everything that needs an Activity / system dialog, passed down to screens. */
 class MediaActions(
@@ -103,7 +103,7 @@ fun GalleryApp(vm: GalleryViewModel = viewModel()) {
 
     val actions = remember(vm, context, senderLauncher) {
         MediaActions(
-            share = { shareMedia(context, it) },
+            share = { vm.share(it) },
             trash = {
                 if (it.isNotEmpty()) senderLauncher.launch(IntentSenderRequest.Builder(vm.trashIntent(it, true)).build())
             },
@@ -118,6 +118,9 @@ fun GalleryApp(vm: GalleryViewModel = viewModel()) {
 
     LaunchedEffect(vm) {
         vm.senderRequests.collect { senderLauncher.launch(IntentSenderRequest.Builder(it).build()) }
+    }
+    LaunchedEffect(vm) {
+        vm.shareRequests.collect { shareUris(context, it.uris, it.mime) }
     }
     LaunchedEffect(vm) {
         vm.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
@@ -187,6 +190,8 @@ private fun ScreenHost(vm: GalleryViewModel, actions: MediaActions, top: Screen?
         is Screen.VaultViewer -> VaultViewerScreen(vm, top.startId) { vm.back() }
         Screen.Search -> SearchScreen(vm, actions) { vm.back() }
         Screen.Duplicates -> DuplicatesScreen(vm, actions) { vm.back() }
+        is Screen.Editor -> EditorScreen(vm, top.media) { vm.back() }
+        is Screen.VideoTrim -> VideoTrimScreen(vm, top.media) { vm.back() }
         is Screen.Viewer -> ViewerScreen(
             vm = vm,
             source = top.source,

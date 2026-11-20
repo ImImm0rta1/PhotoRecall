@@ -470,6 +470,10 @@ private fun OptionsSheet(settings: ViewSettings, showGrouping: Boolean, vm: Gall
             OptionGroup("Show") {
                 MediaFilter.entries.forEach { f -> AppChip(settings.filter == f, f.label) { vm.setFilter(f) } }
             }
+            val stripNow by vm.stripOnShare.collectAsStateWithLifecycle()
+            OptionGroup("Sharing") {
+                AppChip(stripNow, "Remove location & metadata") { vm.setStripOnShare(!stripNow) }
+            }
             val themeNow by vm.themeStyle.collectAsStateWithLifecycle()
             OptionGroup("Theme") {
                 ThemeStyle.entries.forEach { t -> AppChip(themeNow == t, t.label) { vm.setTheme(t) } }

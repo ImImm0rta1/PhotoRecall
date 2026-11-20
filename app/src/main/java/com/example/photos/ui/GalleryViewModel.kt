@@ -30,6 +30,7 @@ import com.example.photos.data.MIN_COLUMNS
 import com.example.photos.data.Media
 import com.example.photos.data.MediaFilter
 import com.example.photos.data.MediaIndexer
+import com.example.photos.data.MetadataStripper
 import com.example.photos.data.MediaRepository
 import com.example.photos.data.Prefs
 import com.example.photos.data.SortField
@@ -77,7 +78,11 @@ sealed interface Screen {
     data class VaultViewer(val startId: String) : Screen
     data object Search : Screen
     data object Duplicates : Screen
+    data class Editor(val media: Media) : Screen
+    data class VideoTrim(val media: Media) : Screen
 }
+
+class ShareRequest(val uris: List<android.net.Uri>, val mime: String)
 
 data class SearchState(val query: String = "", val locationCell: String? = null)
 data class LocationCluster(val cell: String, val label: String, val count: Int)
@@ -90,6 +95,7 @@ private class Basics(
     val fav: Set<String>,
     val rec: List<String>,
     val s: ViewSettings,
+    val hid: List<Media> = emptyList(),
 )
 
 private class Extra(
@@ -123,6 +129,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         prefs.favorites.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val hiddenFolders: StateFlow<Set<String>> =
         prefs.hiddenFolders.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val hiddenItems: StateFlow<Set<String>> =
+        prefs.hiddenItems.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val stripOnShare: StateFlow<Boolean> =
+        prefs.stripOnShare.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private val recent: StateFlow<List<String>> =
         prefs.recent.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -141,8 +151,16 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Everything not in a hidden folder (trash excluded). */
     private val visible: StateFlow<List<Media>> =
-        combine(allMedia, hiddenFolders) { list, hidden ->
-            if (hidden.isEmpty()) list else list.filter { it.folderKey !in hidden }
+        combine(allMedia, hiddenFolders, hiddenItems) { list, hiddenF, hiddenI ->
+            if (hiddenF.isEmpty() && hiddenI.isEmpty()) list
+            else list.filter { it.folderKey !in hiddenF && it.key !in hiddenI }
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Hidden photos/videos (individually hidden or inside a hidden folder). Only shown via ":h". */
+    private val hiddenMedia: StateFlow<List<Media>> =
+        combine(allMedia, hiddenFolders, hiddenItems) { list, hiddenF, hiddenI ->
+            list.filter { it.folderKey in hiddenF || it.key in hiddenI }
         }.flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -301,9 +319,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     fun itemsFlow(source: Source): Flow<List<Media>> {
         val recentFlow: Flow<List<String>> =
             if (source == Source.RecentlyViewed) recent else flowOf(emptyList())
-        val basics = combine(visible, trashed, favorites, recentFlow, settings) { vis, tr, fav, rec, s ->
+        val core = combine(visible, trashed, favorites, recentFlow, settings) { vis, tr, fav, rec, s ->
             Basics(vis, tr, fav, rec, s)
         }
+        val hidFlow: Flow<List<Media>> = if (source == Source.HiddenItems) hiddenMedia else flowOf(emptyList())
+        val basics = combine(core, hidFlow) { b, h -> if (h.isEmpty()) b else Basics(b.vis, b.tr, b.fav, b.rec, b.s, h) }
         val extraFlow: Flow<Extra> =
             if (source is Source.Custom || source == Source.SearchResults) extra else flowOf(EMPTY_EXTRA)
         return combine(basics, extraFlow) { b, x -> compute(source, b, x) }
@@ -313,7 +333,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun snapshot(source: Source): List<Media> = itemCache[source.id] ?: compute(
         source,
-        Basics(visible.value, trashed.value, favorites.value, recent.value, settings.value),
+        Basics(visible.value, trashed.value, favorites.value, recent.value, settings.value, hiddenMedia.value),
         Extra(customAlbums.value, searchState.value, locationMap.value, searchTexts.value),
     )
 
@@ -341,6 +361,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 b.vis.filter { it.key in keys }.view()
             }
             Source.SearchResults -> searchItems(b.vis, x).view()
+            Source.HiddenItems -> b.hid.view()
         }
     }
 
@@ -592,6 +613,52 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun findDuplicates(threshold: Int): List<DuplicateGroup> =
         withContext(Dispatchers.Default) { Dedupe.find(visible.value, indexState.value, threshold) }
+
+    // ---- hide (not the same as locking: hidden items are NOT encrypted) ----
+
+    fun hideItems(keys: Collection<String>) {
+        viewModelScope.launch {
+            prefs.setItemsHidden(keys, true)
+            selection = emptySet()
+            toast("Hidden. Search \":h\" to find them again")
+        }
+    }
+    fun unhideItems(keys: Collection<String>) {
+        viewModelScope.launch {
+            prefs.setItemsHidden(keys, false)
+            selection = emptySet()
+        }
+    }
+
+    // ---- sharing (optionally without location / metadata) ----
+
+    val shareRequests = MutableSharedFlow<ShareRequest>(extraBufferCapacity = 1)
+
+    fun setStripOnShare(v: Boolean) { viewModelScope.launch { prefs.setStripOnShare(v) } }
+
+    fun share(items: List<Media>, forceStrip: Boolean = false) {
+        if (items.isEmpty()) return
+        val mime = when {
+            items.all { it.isVideo } -> "video/*"
+            items.none { it.isVideo } -> "image/*"
+            else -> "*/*"
+        }
+        if (!forceStrip && !stripOnShare.value) {
+            shareRequests.tryEmit(ShareRequest(items.map { it.uri }, mime))
+            return
+        }
+        viewModelScope.launch {
+            toast("Removing location and metadata…")
+            val app = getApplication<Application>()
+            val files = withContext(Dispatchers.IO) { items.mapNotNull { MetadataStripper.strip(app, it) } }
+            if (files.isEmpty()) {
+                toast("Couldn't prepare the files")
+                return@launch
+            }
+            val uris = files.map { androidx.core.content.FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", it) }
+            shareRequests.tryEmit(ShareRequest(uris, mime))
+        }
+    }
 
     // ---- search ----
 

@@ -21,7 +21,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,6 +48,16 @@ fun SearchScreen(vm: GalleryViewModel, actions: MediaActions, onBack: () -> Unit
     val clusters by vm.locationClusters.collectAsStateWithLifecycle()
     val progress by vm.indexProgress.collectAsStateWithLifecycle()
     val focus = remember { FocusRequester() }
+    val hiddenFolders by vm.hiddenFolders.collectAsStateWithLifecycle()
+    val hiddenMode = st.query.trim().equals(":h", ignoreCase = true)
+
+    // ":l" jumps straight to the locked folder (it asks for its own password).
+    LaunchedEffect(st.query) {
+        if (st.query.trim().equals(":l", ignoreCase = true)) {
+            vm.setSearchQuery("")
+            vm.open(Screen.Vault)
+        }
+    }
 
     LaunchedEffect(Unit) { focus.requestFocus() }
     DisposableEffect(Unit) { onDispose { vm.resetSearch() } }
@@ -75,7 +87,7 @@ fun SearchScreen(vm: GalleryViewModel, actions: MediaActions, onBack: () -> Unit
             )
         }
 
-        if (clusters.isNotEmpty()) {
+        if (!hiddenMode && clusters.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -87,7 +99,7 @@ fun SearchScreen(vm: GalleryViewModel, actions: MediaActions, onBack: () -> Unit
                 }
             }
         }
-        progress?.let { (done, total) ->
+        if (!hiddenMode) progress?.let { (done, total) ->
             Text(
                 "Indexing locations and duplicates… $done / $total",
                 style = MaterialTheme.typography.labelSmall,
@@ -96,11 +108,28 @@ fun SearchScreen(vm: GalleryViewModel, actions: MediaActions, onBack: () -> Unit
             )
         }
 
+        if (hiddenMode) {
+            Text(
+                "Hidden",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            )
+            hiddenFolders.sorted().forEach { key ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(key, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TextButton(onClick = { vm.unhideFolder(key) }) { Text("Unhide folder") }
+                }
+            }
+        }
+
         MediaGridScreen(
             vm = vm,
-            source = Source.SearchResults,
+            source = if (hiddenMode) Source.HiddenItems else Source.SearchResults,
             title = "Search",
-            gridId = "search",
+            gridId = if (hiddenMode) "hidden" else "search",
             actions = actions,
             embedded = true,
         )

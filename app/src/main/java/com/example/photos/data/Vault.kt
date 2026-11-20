@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -28,6 +30,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -38,6 +41,7 @@ import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 class VaultItem(
     val id: String,
@@ -278,6 +282,146 @@ class Vault(context: Context) {
         }
     }
 
+    // ---------- portable encrypted backups ----------
+    //
+    // The on-device vault is protected by a Keystore key that can never leave this phone (and is
+    // destroyed on uninstall). Backups are therefore re-encrypted with a key derived from a password
+    // you choose at export time, so they can be restored on any phone / after a reinstall, and then
+    // get re-encrypted under that phone's own Keystore key.
+
+    private fun deriveKey(password: String, salt: ByteArray, iterations: Int): SecretKey {
+        val bytes = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            .generateSecret(PBEKeySpec(password.toCharArray(), salt, iterations, 256)).encoded
+        return SecretKeySpec(bytes, "AES")
+    }
+
+    /** Streams [input] decrypted with [inKey] and re-encrypted with [outKey] (chunk by chunk). */
+    private fun transcodeStream(input: InputStream, inKey: SecretKey, output: OutputStream, outKey: SecretKey) {
+        val din = DataInputStream(input)
+        val dos = DataOutputStream(output)
+        var inIndex = 0L
+        var outIndex = 0L
+        while (true) {
+            val first = input.read()
+            if (first < 0) break
+            val iv = ByteArray(12)
+            iv[0] = first.toByte()
+            din.readFully(iv, 1, 11)
+            val ct = ByteArray(din.readInt())
+            din.readFully(ct)
+            val d = Cipher.getInstance("AES/GCM/NoPadding")
+            d.init(Cipher.DECRYPT_MODE, inKey, GCMParameterSpec(128, iv))
+            d.updateAAD(aad(inIndex++))
+            val plain = d.doFinal(ct)
+            val e = Cipher.getInstance("AES/GCM/NoPadding")
+            e.init(Cipher.ENCRYPT_MODE, outKey)
+            e.updateAAD(aad(outIndex++))
+            val enc = e.doFinal(plain)
+            dos.write(e.iv)
+            dos.writeInt(enc.size)
+            dos.write(enc)
+        }
+        dos.flush()
+    }
+
+    /** Writes one self-contained, password-encrypted .pvault file for [item]. */
+    private fun exportItem(item: VaultItem, out: OutputStream, salt: ByteArray, key: SecretKey) {
+        val thumbFile = File(dir, "${item.id}.thumb")
+        val thumbB64 = runCatching {
+            Base64.encodeToString(decryptBytes(thumbFile.readBytes()), Base64.NO_WRAP)
+        }.getOrNull()
+        val meta = JSONObject().put("name", item.name).put("mime", item.mime).put("video", item.isVideo)
+            .put("size", item.size).put("w", item.width).put("h", item.height).put("dur", item.durationMs)
+            .put("taken", item.dateTaken).put("path", item.origPath).put("thumb", thumbB64 ?: "")
+        val metaEnc = encryptBytes(meta.toString().toByteArray(Charsets.UTF_8), key)
+        val dos = DataOutputStream(out)
+        dos.write(MAGIC)
+        dos.write(salt)
+        dos.writeInt(BACKUP_ITERATIONS)
+        dos.writeInt(metaEnc.size)
+        dos.write(metaEnc)
+        FileInputStream(File(dir, "${item.id}.bin")).buffered().use { transcodeStream(it, secretKey(), dos, key) }
+        dos.flush()
+    }
+
+    /** Exports every item into the folder the user picked (Storage Access Framework tree). */
+    suspend fun exportAll(items: List<VaultItem>, tree: Uri, password: String): Int = withContext(Dispatchers.IO) {
+        val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        // One (slow) key derivation per export; every file still uses fresh random nonces.
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val key = deriveKey(password, salt, BACKUP_ITERATIONS)
+        var ok = 0
+        for (item in items) {
+            val dest = runCatching {
+                DocumentsContract.createDocument(resolver, parent, "application/octet-stream", item.name + ".pvault")
+            }.getOrNull() ?: continue
+            try {
+                resolver.openOutputStream(dest)?.use { exportItem(item, it, salt, key) } ?: error("no output")
+                ok++
+            } catch (e: Exception) {
+                runCatching { DocumentsContract.deleteDocument(resolver, dest) }
+            }
+        }
+        ok
+    }
+
+    /** Result of importing backups: how many worked, how many had a wrong password / were invalid. */
+    class ImportResult(val imported: Int, val wrongPassword: Int, val invalid: Int)
+
+    suspend fun importBackups(uris: List<Uri>, password: String): ImportResult = withContext(Dispatchers.IO) {
+        var wrong = 0
+        var invalid = 0
+        val added = ArrayList<VaultItem>()
+        val keyCache = HashMap<String, SecretKey>()
+        for (uri in uris) {
+            val id = UUID.randomUUID().toString()
+            val bin = File(dir, "$id.bin")
+            val thumb = File(dir, "$id.thumb")
+            try {
+                val input = resolver.openInputStream(uri) ?: run { invalid++; null } ?: continue
+                input.buffered().use { inp ->
+                    val din = DataInputStream(inp)
+                    val magic = ByteArray(MAGIC.size)
+                    din.readFully(magic)
+                    if (!magic.contentEquals(MAGIC)) { invalid++; return@use }
+                    val salt = ByteArray(16)
+                    din.readFully(salt)
+                    val iterations = din.readInt()
+                    val metaEnc = ByteArray(din.readInt())
+                    din.readFully(metaEnc)
+                    val key = keyCache.getOrPut(Base64.encodeToString(salt, Base64.NO_WRAP) + iterations) {
+                        deriveKey(password, salt, iterations)
+                    }
+                    val metaBytes = try {
+                        decryptBytes(metaEnc, key)
+                    } catch (e: GeneralSecurityException) {
+                        wrong++
+                        return@use
+                    }
+                    val meta = JSONObject(String(metaBytes, Charsets.UTF_8))
+                    BufferedOutputStream(FileOutputStream(bin)).use { transcodeStream(din, key, it, secretKey()) }
+                    val thumbB64 = meta.optString("thumb")
+                    if (thumbB64.isNotEmpty()) thumb.writeBytes(encryptBytes(Base64.decode(thumbB64, Base64.NO_WRAP)))
+                    added += VaultItem(
+                        id, meta.getString("name"), meta.getString("mime"), meta.getBoolean("video"),
+                        meta.getLong("size"), meta.getInt("w"), meta.getInt("h"), meta.getLong("dur"),
+                        meta.getLong("taken"), meta.getString("path"), System.currentTimeMillis(),
+                    )
+                }
+                if (added.none { it.id == id }) { bin.delete(); thumb.delete() }
+            } catch (e: Exception) {
+                bin.delete(); thumb.delete()
+                invalid++
+            }
+        }
+        if (added.isNotEmpty()) synchronized(this@Vault) {
+            val all = readIndex() + added
+            writeIndex(all)
+            _items.value = all
+        }
+        ImportResult(added.size, wrong, invalid)
+    }
+
     // ---------- crypto ----------
 
     private fun secretKey(): SecretKey {
@@ -306,8 +450,7 @@ class Vault(context: Context) {
         return total
     }
 
-    private fun encryptStream(input: InputStream, output: OutputStream) {
-        val key = secretKey()
+    private fun encryptStream(input: InputStream, output: OutputStream, key: SecretKey = secretKey()) {
         val buf = ByteArray(CHUNK)
         val dos = DataOutputStream(output)
         var index = 0L
@@ -326,8 +469,7 @@ class Vault(context: Context) {
         dos.flush()
     }
 
-    private fun decryptStream(input: InputStream, output: OutputStream) {
-        val key = secretKey()
+    private fun decryptStream(input: InputStream, output: OutputStream, key: SecretKey = secretKey()) {
         val dis = DataInputStream(input)
         var index = 0L
         while (true) {
@@ -346,19 +488,21 @@ class Vault(context: Context) {
         }
     }
 
-    private fun encryptBytes(bytes: ByteArray): ByteArray {
+    private fun encryptBytes(bytes: ByteArray, key: SecretKey = secretKey()): ByteArray {
         val out = ByteArrayOutputStream()
-        encryptStream(ByteArrayInputStream(bytes), out)
+        encryptStream(ByteArrayInputStream(bytes), out, key)
         return out.toByteArray()
     }
 
-    private fun decryptBytes(bytes: ByteArray): ByteArray {
+    private fun decryptBytes(bytes: ByteArray, key: SecretKey = secretKey()): ByteArray {
         val out = ByteArrayOutputStream()
-        decryptStream(ByteArrayInputStream(bytes), out)
+        decryptStream(ByteArrayInputStream(bytes), out, key)
         return out.toByteArray()
     }
 
     private companion object {
+        val MAGIC = "PVLT1".toByteArray(Charsets.US_ASCII)
+        const val BACKUP_ITERATIONS = 200_000
         const val KEY_ALIAS = "photos_vault_key"
         const val CHUNK = 256 * 1024
         const val P_SALT = "salt"

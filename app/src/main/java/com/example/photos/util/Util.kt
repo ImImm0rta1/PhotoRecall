@@ -87,3 +87,20 @@ fun Context.findActivity(): Activity? {
     }
     return null
 }
+
+/** Opens the share sheet for already-prepared content URIs (used for metadata-free copies too). */
+fun shareUris(context: Context, uris: List<android.net.Uri>, mime: String) {
+    if (uris.isEmpty()) return
+    val list = ArrayList(uris)
+    val intent = if (list.size == 1) {
+        Intent(Intent.ACTION_SEND).apply { putExtra(Intent.EXTRA_STREAM, list[0]) }
+    } else {
+        Intent(Intent.ACTION_SEND_MULTIPLE).apply { putParcelableArrayListExtra(Intent.EXTRA_STREAM, list) }
+    }
+    intent.type = mime
+    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val clip = ClipData.newRawUri(null, list[0])
+    list.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
+    intent.clipData = clip
+    context.startActivity(Intent.createChooser(intent, null))
+}

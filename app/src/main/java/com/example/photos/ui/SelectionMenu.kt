@@ -48,6 +48,21 @@ fun SelectionMenu(vm: GalleryViewModel, source: Source, selected: List<Media>) {
             DropdownMenuItem(text = { Text("Move to folder…") }, onClick = { open = false; dialog = MenuDialog.MOVE })
             DropdownMenuItem(text = { Text("Copy to folder…") }, onClick = { open = false; dialog = MenuDialog.COPY })
             DropdownMenuItem(text = { Text("Move to locked folder") }, onClick = { open = false; dialog = MenuDialog.VAULT })
+            if (source == Source.HiddenItems) {
+                DropdownMenuItem(
+                    text = { Text("Unhide") },
+                    onClick = { open = false; vm.unhideItems(keys) },
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Hide") },
+                    onClick = { open = false; vm.hideItems(keys) },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Share without location & metadata") },
+                onClick = { open = false; vm.share(selected, forceStrip = true) },
+            )
         }
     }
 

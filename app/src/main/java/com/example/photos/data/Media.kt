@@ -96,6 +96,8 @@ sealed interface Source {
     data object Camera : Source { override val id = "camera" }
     data object Videos : Source { override val id = "videos" }
     data object SearchResults : Source { override val id = "search_results" }
+    /** Items hidden individually or via a hidden folder. Only reachable by typing ":h" in search. */
+    data object HiddenItems : Source { override val id = "hidden_items" }
     /** A user-created, virtual album: only stores references, never touches files. */
     data class Custom(val albumId: String) : Source {
         override val id: String get() = "custom:$albumId"
@@ -124,6 +126,6 @@ data class LatLon(val lat: Double, val lon: Double)
 /** Albums whose cover the user may override. */
 val Source.supportsCover: Boolean
     get() = when (this) {
-        Source.All, Source.Trash, Source.SearchResults, Source.RecentlyAdded, Source.RecentlyViewed -> false
+        Source.All, Source.Trash, Source.SearchResults, Source.HiddenItems, Source.RecentlyAdded, Source.RecentlyViewed -> false
         else -> true
     }

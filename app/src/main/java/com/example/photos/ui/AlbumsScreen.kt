@@ -134,10 +134,6 @@ fun AlbumsScreen(vm: GalleryViewModel) {
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Hidden folders (${hidden.size})") },
-                        onClick = { menuOpen = false; showHidden = true },
-                    )
-                    DropdownMenuItem(
                         text = { Text("Find duplicates") },
                         onClick = { menuOpen = false; vm.open(Screen.Duplicates) },
                     )
@@ -185,7 +181,6 @@ fun AlbumsScreen(vm: GalleryViewModel) {
                     onHide = { hideTarget = info },
                 )
             }
-            item(key = "vault") { VaultCard(onClick = { if (!reorder) vm.open(Screen.Vault) }) }
             items(shownRest, key = { it.source.id }) { info ->
                 val id = info.source.id
                 val dragging = draggingId == id
@@ -300,7 +295,7 @@ fun AlbumsScreen(vm: GalleryViewModel) {
             onDismissRequest = { hideTarget = null },
             title = { Text("Hide folder?") },
             text = {
-                Text("“${target.title}” (${target.count} items) won't appear in Photos or albums. You can unhide it from Albums › Hidden folders.")
+                Text("“${target.title}” (${target.count} items) won't appear in Photos or albums. Find it again by typing :h in search.")
             },
             confirmButton = {
                 TextButton(onClick = {

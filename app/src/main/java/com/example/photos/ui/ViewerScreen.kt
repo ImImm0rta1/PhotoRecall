@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -149,7 +150,7 @@ fun ViewerScreen(
     // "Recently viewed" bookkeeping (not for trash, and not while browsing that list itself).
     LaunchedEffect(pagerState.settledPage) {
         val m = items.getOrNull(pagerState.settledPage)
-        if (m != null && !isTrash && source != Source.RecentlyViewed) vm.markViewed(m.key)
+        if (m != null && !isTrash && source != Source.RecentlyViewed && source != Source.HiddenItems) vm.markViewed(m.key)
     }
 
     // Slideshow: advance every 3 seconds, stop at the last item.
@@ -262,8 +263,8 @@ fun ViewerScreen(
                         Modifier.align(Alignment.Center)
                             .clip(RoundedCornerShape(30.dp))
                             .background(Color.Black.copy(alpha = 0.55f))
-                            .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(0.dp),
                     ) {
                         if (current != null) {
                             val list = listOf(current)
@@ -279,6 +280,11 @@ fun ViewerScreen(
                                         tint = if (isFav) NothingRed else Color.White,
                                     )
                                 }
+                            }
+                            if (!isTrash && !current.isGif) {
+                                IconButton(onClick = {
+                                    vm.open(if (current.isVideo) Screen.VideoTrim(current) else Screen.Editor(current))
+                                }) { Icon(Icons.Filled.Edit, "Edit") }
                             }
                             IconButton(onClick = { showInfo = true }) { Icon(Icons.Outlined.Info, "Details") }
                             if (isTrash) {

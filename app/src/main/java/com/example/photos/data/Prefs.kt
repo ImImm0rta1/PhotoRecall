@@ -26,6 +26,8 @@ class Prefs(context: Context) {
         val FILTER = stringPreferencesKey("filter")
         val GROUPING = stringPreferencesKey("grouping")
         val THEME = stringPreferencesKey("theme")
+        val HIDDEN_ITEMS = stringSetPreferencesKey("hidden_items")
+        val STRIP_SHARE = booleanPreferencesKey("strip_on_share")
     }
 
     val favorites: Flow<Set<String>> = ds.data.map { it[K.FAVORITES] ?: emptySet() }
@@ -43,6 +45,17 @@ class Prefs(context: Context) {
             grouping = p[K.GROUPING]?.let { runCatching { Grouping.valueOf(it) }.getOrNull() } ?: Grouping.DAY,
         )
     }
+
+    val hiddenItems: Flow<Set<String>> = ds.data.map { it[K.HIDDEN_ITEMS] ?: emptySet() }
+    val stripOnShare: Flow<Boolean> = ds.data.map { it[K.STRIP_SHARE] ?: false }
+
+    suspend fun setItemsHidden(keys: Collection<String>, hidden: Boolean) {
+        ds.edit { p ->
+            val cur = p[K.HIDDEN_ITEMS] ?: emptySet()
+            p[K.HIDDEN_ITEMS] = if (hidden) cur + keys else cur - keys.toSet()
+        }
+    }
+    suspend fun setStripOnShare(v: Boolean) { ds.edit { it[K.STRIP_SHARE] = v } }
 
     val theme: Flow<ThemeStyle> = ds.data.map { p ->
         p[K.THEME]?.let { runCatching { ThemeStyle.valueOf(it) }.getOrNull() } ?: ThemeStyle.NOTHING
