@@ -21,6 +21,15 @@ enum class MediaFilter(val label: String) {
     SCREENSHOTS("Screenshots"),
 }
 
+enum class ThemeStyle(val label: String) {
+    NOTHING("Nothing"),
+    AURORA("Aurora"),
+    LAGOON("Lagoon"),
+    PEACH("Peach"),
+    CRIMSON("Crimson"),
+    VIOLET("Violet"),
+}
+
 data class ViewSettings(
     val columns: Int = 4,
     val sortField: SortField = SortField.DATE_TAKEN,

@@ -34,6 +34,7 @@ import com.example.photos.data.MediaRepository
 import com.example.photos.data.Prefs
 import com.example.photos.data.SortField
 import com.example.photos.data.Source
+import com.example.photos.data.ThemeStyle
 import com.example.photos.data.Vault
 import com.example.photos.data.ViewSettings
 import com.example.photos.data.cellLabel
@@ -56,11 +57,13 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -122,6 +125,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         prefs.hiddenFolders.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     private val recent: StateFlow<List<String>> =
         prefs.recent.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val themeStyle: StateFlow<ThemeStyle> =
+        prefs.theme.stateIn(viewModelScope, SharingStarted.Eagerly, ThemeStyle.NOTHING)
+    fun setTheme(v: ThemeStyle) { viewModelScope.launch { prefs.setTheme(v) } }
 
     val customAlbums: StateFlow<List<CustomAlbum>> =
         albumStore.albums.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -286,6 +293,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- lists ----
 
+    /** Last computed list per source, so opening the viewer never re-sorts the whole library on the UI thread. */
+    private val itemCache = ConcurrentHashMap<String, List<Media>>()
+
+    fun locationOf(key: String): LatLon? = locationMap.value[key]
+
     fun itemsFlow(source: Source): Flow<List<Media>> {
         val recentFlow: Flow<List<String>> =
             if (source == Source.RecentlyViewed) recent else flowOf(emptyList())
@@ -294,10 +306,12 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         }
         val extraFlow: Flow<Extra> =
             if (source is Source.Custom || source == Source.SearchResults) extra else flowOf(EMPTY_EXTRA)
-        return combine(basics, extraFlow) { b, x -> compute(source, b, x) }.flowOn(Dispatchers.Default)
+        return combine(basics, extraFlow) { b, x -> compute(source, b, x) }
+            .onEach { if (source != Source.SearchResults) itemCache[source.id] = it }
+            .flowOn(Dispatchers.Default)
     }
 
-    fun snapshot(source: Source): List<Media> = compute(
+    fun snapshot(source: Source): List<Media> = itemCache[source.id] ?: compute(
         source,
         Basics(visible.value, trashed.value, favorites.value, recent.value, settings.value),
         Extra(customAlbums.value, searchState.value, locationMap.value, searchTexts.value),

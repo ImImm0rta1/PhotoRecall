@@ -3,7 +3,10 @@
 package com.example.photos.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -92,6 +95,7 @@ import com.example.photos.data.MIN_COLUMNS
 import com.example.photos.data.Media
 import com.example.photos.data.MediaFilter
 import com.example.photos.data.SortField
+import com.example.photos.data.ThemeStyle
 import com.example.photos.data.Source
 import com.example.photos.data.ViewSettings
 import com.example.photos.ui.theme.CardColor
@@ -169,15 +173,28 @@ fun MediaGridScreen(
             )
         } else if (!embedded) {
             Row(
-                Modifier.fillMaxWidth().padding(start = if (onBack == null) 20.dp else 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+                Modifier.fillMaxWidth().padding(start = if (onBack == null) 20.dp else 12.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (onBack != null) {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                    RoundIconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 }
-                Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
-                IconButton(onClick = { vm.open(Screen.Search) }) { Icon(Icons.Filled.Search, "Search") }
-                IconButton(onClick = { showOptions = true }) { Icon(Icons.Filled.Tune, "View options") }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.headlineLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${items.size} items",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                RoundIconButton(onClick = { vm.open(Screen.Search) }) { Icon(Icons.Filled.Search, "Search") }
+                RoundIconButton(onClick = { showOptions = true }) { Icon(Icons.Filled.Tune, "View options") }
             }
         }
 
@@ -218,8 +235,8 @@ fun MediaGridScreen(
                         suppressClick = suppressClick,
                     ),
                 contentPadding = PaddingValues(bottom = bottomPad),
-                horizontalArrangement = Arrangement.spacedBy(1.dp),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 itemsIndexed(
                     entries,
@@ -329,9 +346,17 @@ private fun MediaCell(
     showExpiry: Boolean,
     onClick: () -> Unit,
 ) {
-    Box(Modifier.aspectRatio(1f).clickable(onClick = onClick)) {
+    val scale by animateFloatAsState(if (selected) 0.86f else 1f, label = "cellScale")
+    Box(
+        Modifier
+            .aspectRatio(1f)
+            .mediaSharedBounds(media.key)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(if (selected) 12.dp else 4.dp))
+            .clickable(onClick = onClick),
+    ) {
         MediaThumbnail(media, thumbPx, Modifier.fillMaxSize())
-        if (selected) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)))
+        if (selected) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
         if (selectionMode) SelectionDot(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
         if (favorite && !selectionMode) {
             Icon(
@@ -395,7 +420,8 @@ private fun SelectionBar(
     more: @Composable () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(26.dp)).background(CardColor).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Cancel selection") }
@@ -413,19 +439,6 @@ private fun SelectionBar(
             more()
         }
     }
-}
-
-@Composable
-fun AppChip(selected: Boolean, label: String, onClick: () -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label) },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = NothingRed,
-            selectedLabelColor = Color.White,
-        ),
-    )
 }
 
 private fun orderLabels(f: SortField): Pair<String, String> = when (f) {
@@ -456,6 +469,10 @@ private fun OptionsSheet(settings: ViewSettings, showGrouping: Boolean, vm: Gall
             }
             OptionGroup("Show") {
                 MediaFilter.entries.forEach { f -> AppChip(settings.filter == f, f.label) { vm.setFilter(f) } }
+            }
+            val themeNow by vm.themeStyle.collectAsStateWithLifecycle()
+            OptionGroup("Theme") {
+                ThemeStyle.entries.forEach { t -> AppChip(themeNow == t, t.label) { vm.setTheme(t) } }
             }
             Column {
                 Text("Columns: ${settings.columns}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)

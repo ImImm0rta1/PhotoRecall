@@ -25,6 +25,7 @@ class Prefs(context: Context) {
         val DESC = booleanPreferencesKey("descending")
         val FILTER = stringPreferencesKey("filter")
         val GROUPING = stringPreferencesKey("grouping")
+        val THEME = stringPreferencesKey("theme")
     }
 
     val favorites: Flow<Set<String>> = ds.data.map { it[K.FAVORITES] ?: emptySet() }
@@ -43,6 +44,11 @@ class Prefs(context: Context) {
         )
     }
 
+    val theme: Flow<ThemeStyle> = ds.data.map { p ->
+        p[K.THEME]?.let { runCatching { ThemeStyle.valueOf(it) }.getOrNull() } ?: ThemeStyle.NOTHING
+    }
+
+    suspend fun setTheme(v: ThemeStyle) { ds.edit { it[K.THEME] = v.name } }
     suspend fun setColumns(v: Int) { ds.edit { it[K.COLUMNS] = v } }
     suspend fun setSort(v: SortField) { ds.edit { it[K.SORT] = v.name } }
     suspend fun setDescending(v: Boolean) { ds.edit { it[K.DESC] = v } }

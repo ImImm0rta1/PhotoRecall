@@ -23,7 +23,12 @@ import coil.request.ImageRequest
 import com.example.photos.data.Media
 import com.example.photos.ui.theme.CardColorHigh
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+
+/** Limits parallel system-thumbnail decodes so fast scrolling never starves the CPU. */
+private val thumbGate = Semaphore(4)
 
 object ThumbCache : LruCache<String, Bitmap>(
     (Runtime.getRuntime().maxMemory() / 8).toInt().coerceAtLeast(8 * 1024 * 1024),
@@ -42,7 +47,9 @@ fun MediaThumbnail(media: Media, px: Int, modifier: Modifier = Modifier) {
     } else {
         val context = LocalContext.current
         AsyncImage(
-            model = ImageRequest.Builder(context).data(media.uri).size(px).build(),
+            model = remember(media.uri, px) {
+                ImageRequest.Builder(context).data(media.uri).size(px).crossfade(120).build()
+            },
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier,
@@ -63,7 +70,9 @@ fun SystemThumbnail(
     LaunchedEffect(cacheKey) {
         if (bitmap == null) {
             val loaded = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.loadThumbnail(media.uri, Size(px, px), null) }.getOrNull()
+                thumbGate.withPermit {
+                    runCatching { context.contentResolver.loadThumbnail(media.uri, Size(px, px), null) }.getOrNull()
+                }
             }
             if (loaded != null) {
                 ThumbCache.put(cacheKey, loaded)

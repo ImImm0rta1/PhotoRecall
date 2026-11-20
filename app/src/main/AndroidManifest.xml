@@ -17,6 +17,7 @@
     <application
         android:name=".PhotosApplication"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:label="Photos"
         android:supportsRtl="true"
         android:theme="@style/Theme.Photos">

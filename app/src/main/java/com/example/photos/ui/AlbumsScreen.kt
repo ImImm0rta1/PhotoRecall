@@ -78,6 +78,8 @@ fun AlbumsScreen(vm: GalleryViewModel) {
     var renameTarget by remember { mutableStateOf<AlbumInfo?>(null) }
     var deleteTarget by remember { mutableStateOf<AlbumInfo?>(null) }
     var coverTarget by remember { mutableStateOf<AlbumInfo?>(null) }
+    var showTheme by remember { mutableStateOf(false) }
+    val themeNow by vm.themeStyle.collectAsStateWithLifecycle()
 
     // Drag-and-drop reordering (applies to custom albums + folders; smart albums stay pinned).
     var reorder by remember { mutableStateOf(false) }
@@ -93,14 +95,27 @@ fun AlbumsScreen(vm: GalleryViewModel) {
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Albums", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
-            IconButton(onClick = { vm.open(Screen.Search) }) { Icon(Icons.Filled.Search, "Search") }
-            IconButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, "New album") }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Albums",
+                    style = MaterialTheme.typography.headlineLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "${albums.size} albums",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            RoundIconButton(onClick = { vm.open(Screen.Search) }) { Icon(Icons.Filled.Search, "Search") }
+            RoundIconButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, "New album") }
             Box {
-                IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                RoundIconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, "More") }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     AlbumSort.entries.forEach { s ->
                         DropdownMenuItem(
@@ -125,6 +140,10 @@ fun AlbumsScreen(vm: GalleryViewModel) {
                     DropdownMenuItem(
                         text = { Text("Find duplicates") },
                         onClick = { menuOpen = false; vm.open(Screen.Duplicates) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Appearance…") },
+                        onClick = { menuOpen = false; showTheme = true },
                     )
                 }
             }
@@ -272,6 +291,10 @@ fun AlbumsScreen(vm: GalleryViewModel) {
         )
     }
 
+    if (showTheme) {
+        ThemePickerDialog(current = themeNow, onPick = { vm.setTheme(it) }, onDismiss = { showTheme = false })
+    }
+
     hideTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { hideTarget = null },
@@ -355,7 +378,7 @@ private fun AlbumCardWithMenu(
 private fun AlbumCard(info: AlbumInfo, onClick: () -> Unit, onLongClick: () -> Unit) {
     Column(
         Modifier
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(26.dp))
             .background(CardColor)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(6.dp),
