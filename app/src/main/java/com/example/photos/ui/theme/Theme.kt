@@ -33,7 +33,8 @@ class Palette(
     val titleFont: FontFamily,
 )
 
-private fun vertical(vararg c: Color): Brush = Brush.verticalGradient(c.toList())
+private fun vertical(a: Color, b: Color): Brush = Brush.verticalGradient(listOf(a, b))
+private fun vertical(a: Color, b: Color, c: Color): Brush = Brush.verticalGradient(listOf(a, b, c))
 
 fun paletteOf(style: ThemeStyle): Palette = when (style) {
     // Nothing-phone style: pure black, red accent, serif titles.
