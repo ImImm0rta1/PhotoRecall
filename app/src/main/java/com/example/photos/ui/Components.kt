@@ -29,6 +29,9 @@ import com.example.photos.data.ThemeStyle
 import com.example.photos.ui.theme.LocalPalette
 import com.example.photos.ui.theme.paletteOf
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+
 /** Circular, softly tinted icon button used in headers (follows the active theme). */
 @Composable
 fun RoundIconButton(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
