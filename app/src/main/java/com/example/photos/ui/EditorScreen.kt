@@ -100,6 +100,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
+
 private enum class EditTab(val label: String, val icon: ImageVector) {
     CROP("Crop", Icons.Filled.Crop),
     ADJUST("Adjust", Icons.Filled.Tune),
