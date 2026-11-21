@@ -58,7 +58,7 @@ class Prefs(context: Context) {
     suspend fun setStripOnShare(v: Boolean) { ds.edit { it[K.STRIP_SHARE] = v } }
 
     val theme: Flow<ThemeStyle> = ds.data.map { p ->
-        p[K.THEME]?.let { runCatching { ThemeStyle.valueOf(it) }.getOrNull() } ?: ThemeStyle.NOTHING
+        p[K.THEME]?.let { runCatching { ThemeStyle.valueOf(it) }.getOrNull() } ?: ThemeStyle.LAGOON
     }
 
     suspend fun setTheme(v: ThemeStyle) { ds.edit { it[K.THEME] = v.name } }

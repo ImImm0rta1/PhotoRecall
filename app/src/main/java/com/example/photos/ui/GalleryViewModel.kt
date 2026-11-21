@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.ContentResolver
 import android.content.IntentSender
 import android.content.pm.PackageManager
+import android.os.Process
 import android.provider.MediaStore
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.getValue
@@ -43,8 +44,10 @@ import com.example.photos.data.cellOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -65,6 +68,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -137,7 +141,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         prefs.recent.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val themeStyle: StateFlow<ThemeStyle> =
-        prefs.theme.stateIn(viewModelScope, SharingStarted.Eagerly, ThemeStyle.NOTHING)
+        prefs.theme.stateIn(viewModelScope, SharingStarted.Eagerly, ThemeStyle.LAGOON)
     fun setTheme(v: ThemeStyle) { viewModelScope.launch { prefs.setTheme(v) } }
 
     val customAlbums: StateFlow<List<CustomAlbum>> =
@@ -230,6 +234,20 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     /** Keeps scroll position of each grid when navigating away and back. */
     fun gridState(id: String): LazyGridState = gridStates.getOrPut(id) { LazyGridState() }
 
+    /** Where the tapped thumbnail sits on screen (window px), used for the open/close animation. */
+    var openOrigin: androidx.compose.ui.geometry.Rect? = null
+
+    /** True once the viewer finished its entrance animation (so returning to it doesn't replay it). */
+    var viewerEntered: Boolean = false
+
+    /** Replaces the top screen (e.g. viewer -> editor) so "back" returns to the grid. */
+    fun replaceTop(screen: Screen) {
+        selection = emptySet()
+        if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
+        viewerEntered = false
+        stack.add(screen)
+    }
+
     fun selectTab(t: Tab) { selection = emptySet(); tab = t }
     fun open(screen: Screen) { selection = emptySet(); stack.add(screen) }
     fun back() {
@@ -278,6 +296,14 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
 
     private var indexJob: Job? = null
 
+    /** Low-priority workers so background analysis never competes with scrolling. */
+    private val indexDispatcher = Executors.newFixedThreadPool(2) { r ->
+        Thread {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+            r.run()
+        }
+    }.asCoroutineDispatcher()
+
     private fun startIndexing() {
         val locationOk = ContextCompat.checkSelfPermission(
             getApplication<Application>(), Manifest.permission.ACCESS_MEDIA_LOCATION,
@@ -291,10 +317,11 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (todo.isEmpty()) return
         indexJob?.cancel()
-        indexJob = viewModelScope.launch(Dispatchers.IO) {
+        indexJob = viewModelScope.launch(indexDispatcher) {
+            delay(4000) // let the UI settle first
             var done = 0
             _indexProgress.value = 0 to todo.size
-            for (chunk in todo.chunked(200)) {
+            for (chunk in todo.chunked(60)) {
                 val results = chunk.chunked(chunk.size / 4 + 1).map { part ->
                     async { part.map { m -> m.key to indexer.compute(m, known[m.key], locationOk) } }
                 }.awaitAll().flatten()
@@ -304,6 +331,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 indexState.update { it + batch }
                 done += chunk.size
                 _indexProgress.value = done to todo.size
+                delay(150)
             }
             _indexProgress.value = null
         }

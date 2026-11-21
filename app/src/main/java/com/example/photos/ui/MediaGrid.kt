@@ -5,6 +5,9 @@ package com.example.photos.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import com.example.photos.ui.theme.LocalPalette
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -152,6 +155,7 @@ fun MediaGridScreen(
     val selected = remember(items, selection) { items.filter { it.key in selection } }
     val gridState = vm.gridState(gridId)
     val suppressClick = remember { booleanArrayOf(false) }
+    var gridWindow by remember { mutableStateOf(Offset.Zero) }
 
     Column(if (embedded) Modifier.fillMaxSize() else Modifier.fillMaxSize().statusBarsPadding()) {
         if (inSelection) {
@@ -172,34 +176,20 @@ fun MediaGridScreen(
                 more = { SelectionMenu(vm, source, selected) },
             )
         } else if (!embedded) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = if (onBack == null) 20.dp else 12.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ScreenHeader(
+                title = title,
+                subtitle = if (items.size == 1) "1 item" else "${items.size} items",
+                onBack = onBack,
             ) {
-                if (onBack != null) {
-                    RoundIconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                if (onBack == null) {
+                    RoundIconButton(onClick = { vm.open(Screen.Search) }) { Icon(Icons.Filled.Search, "Search") }
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.headlineLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "${items.size} items",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                RoundIconButton(onClick = { vm.open(Screen.Search) }) { Icon(Icons.Filled.Search, "Search") }
                 RoundIconButton(onClick = { showOptions = true }) { Icon(Icons.Filled.Tune, "View options") }
             }
         }
 
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 2.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 0.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             MediaFilter.entries.forEach { f ->
@@ -219,13 +209,17 @@ fun MediaGridScreen(
         if (items.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (!loaded) CircularProgressIndicator(color = NothingRed)
-                else Text("Nothing here yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else EmptyState(
+                    if (embedded) "Search your library" else "Nothing here yet",
+                    if (embedded) "By name, date, album or type" else null,
+                )
             }
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(settings.columns),
                 state = gridState,
                 modifier = Modifier.fillMaxSize()
+                    .onGloballyPositioned { gridWindow = it.positionInWindow() }
                     .pinchToChangeColumns { d -> vm.setColumns(settings.columns + d) }
                     .dragSelect(
                         gridState = gridState,
@@ -234,7 +228,7 @@ fun MediaGridScreen(
                         setSelection = { vm.replaceSelection(it) },
                         suppressClick = suppressClick,
                     ),
-                contentPadding = PaddingValues(bottom = bottomPad),
+                contentPadding = PaddingValues(top = 2.dp, bottom = bottomPad),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
@@ -263,7 +257,19 @@ fun MediaGridScreen(
                                 onClick = {
                                     if (!suppressClick[0]) {
                                         if (inSelection) vm.toggleSelect(m.key)
-                                        else vm.open(Screen.Viewer(source, m.key))
+                                        else {
+                                            // Remember where the thumbnail is so the viewer can grow out of it.
+                                            val info = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == m.key }
+                                            vm.openOrigin = info?.let {
+                                                androidx.compose.ui.geometry.Rect(
+                                                    gridWindow.x + it.offset.x,
+                                                    gridWindow.y + it.offset.y,
+                                                    gridWindow.x + it.offset.x + it.size.width,
+                                                    gridWindow.y + it.offset.y + it.size.height,
+                                                )
+                                            }
+                                            vm.open(Screen.Viewer(source, m.key))
+                                        }
                                     }
                                 },
                             )
@@ -350,7 +356,6 @@ private fun MediaCell(
     Box(
         Modifier
             .aspectRatio(1f)
-            .mediaSharedBounds(media.key)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(if (selected) 12.dp else 4.dp))
             .clickable(onClick = onClick),
@@ -451,8 +456,8 @@ private fun orderLabels(f: SortField): Pair<String, String> = when (f) {
 private fun OptionsSheet(settings: ViewSettings, showGrouping: Boolean, vm: GalleryViewModel, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = CardColor) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 24.dp).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             OptionGroup("Sort by") {
                 SortField.entries.forEach { f -> AppChip(settings.sortField == f, f.label) { vm.setSort(f) } }
@@ -485,7 +490,13 @@ private fun OptionsSheet(settings: ViewSettings, showGrouping: Boolean, vm: Gall
                     onValueChange = { vm.setColumns(it.roundToInt()) },
                     valueRange = MIN_COLUMNS.toFloat()..MAX_COLUMNS.toFloat(),
                     steps = MAX_COLUMNS - MIN_COLUMNS - 1,
-                    colors = SliderDefaults.colors(thumbColor = NothingRed, activeTrackColor = NothingRed),
+                    colors = SliderDefaults.colors(
+                        thumbColor = NothingRed,
+                        activeTrackColor = NothingRed,
+                        inactiveTrackColor = LocalPalette.current.text.copy(alpha = 0.14f),
+                        activeTickColor = Color.Transparent,
+                        inactiveTickColor = Color.Transparent,
+                    ),
                 )
             }
         }
@@ -496,7 +507,10 @@ private fun OptionsSheet(settings: ViewSettings, showGrouping: Boolean, vm: Gall
 private fun OptionGroup(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { content() }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) { content() }
     }
 }
 

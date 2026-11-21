@@ -102,6 +102,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -124,6 +125,7 @@ fun ViewerScreen(
     startKey: String,
     actions: MediaActions,
     onBack: () -> Unit,
+    onPageChanged: (String) -> Unit = {},
 ) {
     val initial = remember(source) { vm.snapshot(source) }
     val items by remember(source) { vm.itemsFlow(source) }.collectAsStateWithLifecycle(initialValue = initial)
@@ -145,6 +147,7 @@ fun ViewerScreen(
     val current = items.getOrNull(pagerState.currentPage)
 
     LaunchedEffect(items.isEmpty()) { if (items.isEmpty()) onBack() }
+    LaunchedEffect(pagerState.currentPage) { items.getOrNull(pagerState.currentPage)?.let { onPageChanged(it.key) } }
     BackHandler(enabled = showInfo) { showInfo = false }
 
     // "Recently viewed" bookkeeping (not for trash, and not while browsing that list itself).
@@ -283,7 +286,7 @@ fun ViewerScreen(
                             }
                             if (!isTrash && !current.isGif) {
                                 IconButton(onClick = {
-                                    vm.open(if (current.isVideo) Screen.VideoTrim(current) else Screen.Editor(current))
+                                    vm.replaceTop(if (current.isVideo) Screen.VideoTrim(current) else Screen.Editor(current))
                                 }) { Icon(Icons.Filled.Edit, "Edit") }
                             }
                             IconButton(onClick = { showInfo = true }) { Icon(Icons.Outlined.Info, "Details") }
@@ -330,8 +333,8 @@ internal fun ViewerPage(
     val context = LocalContext.current
     when {
         media.isVideo -> VideoPage(media, active = isCurrent && !slideshow, controlsVisible = controlsVisible, onTap = onTap)
-        media.isRaw -> ZoomableBox(onTap, Modifier.mediaSharedBounds(media.key)) { RawImage(media) }
-        else -> ZoomableBox(onTap, Modifier.mediaSharedBounds(media.key)) {
+        media.isRaw -> ZoomableBox(onTap) { RawImage(media) }
+        else -> ZoomableBox(onTap) {
             // The default image loader animates GIFs here.
             AsyncImage(
                 model = remember(media.uri) { ImageRequest.Builder(context).data(media.uri).size(1600).build() },
@@ -457,7 +460,7 @@ private fun ZoomableBox(
 
 @Composable
 private fun VideoPage(media: Media, active: Boolean, controlsVisible: Boolean, onTap: () -> Unit) {
-    Box(Modifier.fillMaxSize().mediaSharedBounds(media.key), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (active) {
             VideoSurface(media, controlsVisible, onTap)
         } else {
@@ -477,7 +480,8 @@ private fun VideoSurface(media: Media, controlsVisible: Boolean, onTap: () -> Un
     val context = LocalContext.current
     val player = remember(media.uri) {
         ExoPlayer.Builder(context)
-            .setAudioAttributes(AudioAttributes.DEFAULT, true)
+            // Don't wait for audio focus: another app holding it (recorders, dictation) must not leave a black screen.
+            .setAudioAttributes(AudioAttributes.DEFAULT, false)
             .setHandleAudioBecomingNoisy(true)
             .build()
             .apply {
@@ -499,11 +503,13 @@ private fun VideoSurface(media: Media, controlsVisible: Boolean, onTap: () -> Un
     var muted by remember { mutableStateOf(false) }
     var speedIndex by remember { mutableIntStateOf(0) }
     var hint by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
     val speeds = remember { floatArrayOf(1f, 1.5f, 2f, 0.5f) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onPlayerError(error: PlaybackException) { failed = true; buffering = false }
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
                 ended = state == Player.STATE_ENDED
@@ -547,7 +553,26 @@ private fun VideoSurface(media: Media, controlsVisible: Boolean, onTap: () -> Un
             )
         }
 
-        if (buffering) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+        if (buffering && !failed) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+        if (failed) {
+            Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("This video can't be played here", color = Color.White)
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    androidx.compose.material3.TextButton(onClick = { failed = false; buffering = true; player.prepare(); player.play() }) {
+                        Text("Retry")
+                    }
+                    androidx.compose.material3.TextButton(onClick = {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                    .setDataAndType(media.uri, media.mime.ifBlank { "video/*" })
+                                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                            )
+                        }
+                    }) { Text("Open with…") }
+                }
+            }
+        }
         hint?.let {
             Text(
                 it,

@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,8 +64,12 @@ fun SearchScreen(vm: GalleryViewModel, actions: MediaActions, onBack: () -> Unit
     DisposableEffect(Unit) { onDispose { vm.resetSearch() } }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            RoundIconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             TextField(
                 value = st.query,
                 onValueChange = vm::setSearchQuery,
@@ -78,6 +83,7 @@ fun SearchScreen(vm: GalleryViewModel, actions: MediaActions, onBack: () -> Unit
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                 ),
+                leadingIcon = { Icon(Icons.Filled.Search, null) },
                 trailingIcon = {
                     if (st.query.isNotEmpty()) {
                         IconButton(onClick = { vm.setSearchQuery("") }) { Icon(Icons.Filled.Close, "Clear") }

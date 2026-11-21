@@ -22,12 +22,9 @@ enum class MediaFilter(val label: String) {
 }
 
 enum class ThemeStyle(val label: String) {
-    NOTHING("Nothing"),
-    AURORA("Aurora"),
     LAGOON("Lagoon"),
     PEACH("Peach"),
     CRIMSON("Crimson"),
-    VIOLET("Violet"),
 }
 
 data class ViewSettings(

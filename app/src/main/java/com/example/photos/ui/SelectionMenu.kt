@@ -3,11 +3,16 @@ package com.example.photos.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.RemoveCircleOutline
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,36 +38,24 @@ fun SelectionMenu(vm: GalleryViewModel, source: Source, selected: List<Media>) {
 
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "More") }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("Add to album") }, onClick = { open = false; dialog = MenuDialog.ADD })
+        ThemedMenu(expanded = open, onDismiss = { open = false }) {
+            MenuRow("Add to album", Icons.Outlined.CreateNewFolder) { open = false; dialog = MenuDialog.ADD }
             if (source is Source.Custom) {
-                DropdownMenuItem(
-                    text = { Text("Remove from this album") },
-                    onClick = {
-                        open = false
-                        vm.removeFromAlbum(source.albumId, keys)
-                        vm.clearSelection()
-                    },
-                )
+                MenuRow("Remove from this album", Icons.Outlined.RemoveCircleOutline) {
+                    open = false
+                    vm.removeFromAlbum(source.albumId, keys)
+                    vm.clearSelection()
+                }
             }
-            DropdownMenuItem(text = { Text("Move to folder…") }, onClick = { open = false; dialog = MenuDialog.MOVE })
-            DropdownMenuItem(text = { Text("Copy to folder…") }, onClick = { open = false; dialog = MenuDialog.COPY })
-            DropdownMenuItem(text = { Text("Move to locked folder") }, onClick = { open = false; dialog = MenuDialog.VAULT })
+            MenuRow("Move to folder…", Icons.Outlined.FolderOpen) { open = false; dialog = MenuDialog.MOVE }
+            MenuRow("Copy to folder…", Icons.Outlined.ContentCopy) { open = false; dialog = MenuDialog.COPY }
+            MenuRow("Move to locked folder", Icons.Outlined.Lock) { open = false; dialog = MenuDialog.VAULT }
             if (source == Source.HiddenItems) {
-                DropdownMenuItem(
-                    text = { Text("Unhide") },
-                    onClick = { open = false; vm.unhideItems(keys) },
-                )
+                MenuRow("Unhide", Icons.Outlined.Visibility) { open = false; vm.unhideItems(keys) }
             } else {
-                DropdownMenuItem(
-                    text = { Text("Hide") },
-                    onClick = { open = false; vm.hideItems(keys) },
-                )
+                MenuRow("Hide", Icons.Outlined.VisibilityOff) { open = false; vm.hideItems(keys) }
             }
-            DropdownMenuItem(
-                text = { Text("Share without location & metadata") },
-                onClick = { open = false; vm.share(selected, forceStrip = true) },
-            )
+            MenuRow("Share without location", Icons.Outlined.Shield) { open = false; vm.share(selected, forceStrip = true) }
         }
     }
 

@@ -10,7 +10,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -212,9 +214,12 @@ fun DetailsScreen(media: Media, indexedLocation: LatLon?, onDismiss: () -> Unit)
                     }
                 }
 
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    InfoCard("Storage path", "Phone/" + media.relativePath + media.name, Modifier.weight(1f))
-                    InfoCard("Name", media.name, Modifier.weight(1f))
+                Row(
+                    Modifier.fillMaxWidth().height(IntrinsicSize.Max),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    InfoCard("Storage path", "Phone/" + media.relativePath + media.name, Modifier.weight(1f).fillMaxHeight())
+                    InfoCard("Name", media.name, Modifier.weight(1f).fillMaxHeight())
                 }
             }
         }
@@ -235,8 +240,8 @@ private fun Chip(text: String) {
 private fun InfoCard(label: String, value: String, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
     Column(
-        modifier.clip(RoundedCornerShape(18.dp)).background(p.card).padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier.clip(RoundedCornerShape(22.dp)).background(p.card).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(label, fontSize = 11.sp, color = p.text)
         Text(value, fontSize = 11.sp, color = p.muted)

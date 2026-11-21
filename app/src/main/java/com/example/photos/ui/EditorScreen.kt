@@ -26,7 +26,18 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.PhotoFilter
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.photos.ui.theme.EditorStyle
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.RotateLeft
@@ -89,8 +100,12 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-private enum class EditTab(val label: String) {
-    CROP("Crop"), ADJUST("Adjust"), FILTER("Filters"), DRAW("Draw"), TEXT("Text"),
+private enum class EditTab(val label: String, val icon: ImageVector) {
+    CROP("Crop", Icons.Filled.Crop),
+    ADJUST("Adjust", Icons.Filled.Tune),
+    FILTER("Filters", Icons.Filled.PhotoFilter),
+    DRAW("Draw", Icons.Filled.Brush),
+    TEXT("Text", Icons.Filled.TextFields),
 }
 
 private enum class AdjustParam(val label: String) {
@@ -148,21 +163,58 @@ fun EditorScreen(vm: GalleryViewModel, media: Media, onClose: () -> Unit) {
         preview = withContext(Dispatchers.Default) { EditPipeline.render(f, st, withTexts = false) }
     }
 
+    // Undo / redo: a change is committed to history once the user pauses for a moment.
+    var undo by remember { mutableStateOf<List<EditState>>(emptyList()) }
+    var redo by remember { mutableStateOf<List<EditState>>(emptyList()) }
+    var committed by remember { mutableStateOf(EditState()) }
+    LaunchedEffect(st) {
+        delay(400)
+        if (st != committed) {
+            undo = (undo + committed).takeLast(40)
+            committed = st
+            redo = emptyList()
+        }
+    }
+    fun doUndo() {
+        if (st != committed) {
+            redo = redo + st
+            st = committed
+        } else if (undo.isNotEmpty()) {
+            redo = redo + committed
+            val prev = undo.last()
+            undo = undo.dropLast(1)
+            committed = prev
+            st = prev
+        }
+    }
+    fun doRedo() {
+        if (redo.isNotEmpty()) {
+            val next = redo.last()
+            redo = redo.dropLast(1)
+            undo = undo + committed
+            committed = next
+            st = next
+        }
+    }
+
     BackHandler { if (st.isModified) showDiscard = true else onClose() }
 
     Column(Modifier.fillMaxSize().background(p.background).statusBarsPadding().navigationBarsPadding()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             RoundIconButton(onClick = { if (st.isModified) showDiscard = true else onClose() }) {
                 Icon(Icons.Filled.Close, "Close")
             }
-            Text(
-                "Edit",
-                modifier = Modifier.weight(1f).padding(start = 14.dp),
-                style = MaterialTheme.typography.titleLarge,
-            )
+            Box(Modifier.weight(1f))
+            Row(Modifier.clip(CircleShape).background(p.card), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { doUndo() }, enabled = st != committed || undo.isNotEmpty()) {
+                    Icon(Icons.Filled.Undo, "Undo")
+                }
+                IconButton(onClick = { doRedo() }, enabled = redo.isNotEmpty()) { Icon(Icons.Filled.Redo, "Redo") }
+            }
             Button(
                 onClick = { showSave = true },
                 enabled = frame != null && !saving,
@@ -242,7 +294,7 @@ fun EditorScreen(vm: GalleryViewModel, media: Media, onClose: () -> Unit) {
                             Icon(Icons.Filled.Flip, "Flip vertically", modifier = Modifier.rotate(90f))
                         }
                     }
-                    SliderRow("Straighten", "${st.straighten.roundToInt()}°", st.straighten, -30f..30f) { st = st.copy(straighten = it) }
+                    DialSlider(st.straighten, -30f..30f, "Straighten", "${st.straighten.roundToInt()}°") { st = st.copy(straighten = it) }
                 }
                 EditTab.ADJUST -> {
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -256,7 +308,7 @@ fun EditorScreen(vm: GalleryViewModel, media: Media, onClose: () -> Unit) {
                         AdjustParam.VIGNETTE -> st.vignette
                     }
                     val range = if (adjust == AdjustParam.VIGNETTE) 0f..1f else -1f..1f
-                    SliderRow(adjust.label, "${(value * 100).roundToInt()}", value, range) { v ->
+                    DialSlider(value, range, adjust.label, "${(value * 100).roundToInt()}") { v ->
                         st = when (adjust) {
                             AdjustParam.BRIGHTNESS -> st.copy(brightness = v)
                             AdjustParam.CONTRAST -> st.copy(contrast = v)
@@ -314,16 +366,7 @@ fun EditorScreen(vm: GalleryViewModel, media: Media, onClose: () -> Unit) {
             }
         }
 
-        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            EditTab.entries.forEach { t ->
-                Text(
-                    t.label,
-                    color = if (tab == t) p.accent else p.text,
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.clip(CircleShape).clickable { tab = t }.padding(horizontal = 14.dp, vertical = 10.dp),
-                )
-            }
-        }
+        EditorTabs(tab) { tab = it }
     }
 
     if (addingText || textDialog != null) {
@@ -614,6 +657,112 @@ private fun TextOverlays(
                         .clickable(enabled = interactive) { onSelect(t.id) },
                 )
             }
+        }
+    }
+}
+
+/** Tool bar below the preview. One design per theme. */
+@Composable
+private fun EditorTabs(selected: EditTab, onSelect: (EditTab) -> Unit) {
+    val p = LocalPalette.current
+    when (p.editorStyle) {
+        EditorStyle.LABELED -> Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            EditTab.entries.forEach { t ->
+                val tint = if (t == selected) p.accent else p.text.copy(alpha = 0.85f)
+                Column(
+                    Modifier.clip(RoundedCornerShape(14.dp)).clickable { onSelect(t) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(t.icon, t.label, tint = tint)
+                    Text(t.label, style = MaterialTheme.typography.labelSmall, color = tint)
+                }
+            }
+        }
+        EditorStyle.CIRCLES -> Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
+                .clip(CircleShape).background(p.card).padding(6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            EditTab.entries.forEach { t ->
+                val sel = t == selected
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape)
+                        .background(if (sel) p.accent else Color.Transparent).clickable { onSelect(t) },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(t.icon, t.label, tint = if (sel) p.onAccent else p.text) }
+            }
+        }
+        EditorStyle.PILLS -> Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
+                .clip(RoundedCornerShape(30.dp)).background(p.card).padding(6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            EditTab.entries.forEach { t ->
+                val sel = t == selected
+                Row(
+                    Modifier.clip(CircleShape).background(if (sel) p.accent else Color.Transparent)
+                        .clickable { onSelect(t) }
+                        .padding(horizontal = if (sel) 14.dp else 10.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(t.icon, t.label, tint = if (sel) Color.White else p.muted, modifier = Modifier.size(20.dp))
+                    if (sel) {
+                        Text(t.label, color = Color.White, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Ruler-style dial: drag sideways to change the value; shows the value large above the ticks. */
+@Composable
+private fun DialSlider(
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    label: String,
+    display: String,
+    onChange: (Float) -> Unit,
+) {
+    val p = LocalPalette.current
+    val valueNow by rememberUpdatedState(value)
+    val changeNow by rememberUpdatedState(onChange)
+    val span = range.endInclusive - range.start
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(display, style = MaterialTheme.typography.headlineLarge.copy(fontSize = 34.sp))
+        Text(label, color = p.muted, style = MaterialTheme.typography.labelLarge)
+        Canvas(
+            Modifier.fillMaxWidth().height(56.dp).pointerInput(range) {
+                detectHorizontalDragGestures { change, dx ->
+                    change.consume()
+                    changeNow((valueNow + dx / size.width * span * 0.9f).coerceIn(range.start, range.endInclusive))
+                }
+            },
+        ) {
+            val w = size.width
+            val h = size.height
+            val pxPerUnit = w * 0.9f / span
+            val cx = w / 2f
+            val step = span / 40f
+            val first = kotlin.math.ceil(range.start / step).toInt()
+            val last = kotlin.math.floor(range.endInclusive / step).toInt()
+            for (i in first..last) {
+                val v = i * step
+                val x = cx + (valueNow - v) * pxPerUnit
+                if (x < 0f || x > w) continue
+                val major = i % 5 == 0
+                val fade = 1f - (kotlin.math.abs(x - cx) / (w / 2f)).coerceIn(0f, 1f) * 0.7f
+                drawLine(
+                    p.text.copy(alpha = (if (major) 0.8f else 0.4f) * fade),
+                    Offset(x, h * (if (major) 0.35f else 0.5f)),
+                    Offset(x, h * 0.85f),
+                    strokeWidth = if (major) 2.5f else 1.5f,
+                )
+            }
+            drawLine(p.accent, Offset(cx, 0f), Offset(cx, h * 0.9f), strokeWidth = 4f)
         }
     }
 }

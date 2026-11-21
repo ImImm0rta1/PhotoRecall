@@ -1,6 +1,8 @@
 package com.example.photos.ui
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -86,3 +88,131 @@ fun ThemePickerDialog(current: ThemeStyle, onPick: (ThemeStyle) -> Unit, onDismi
     )
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Shared building blocks (consistent spacing, menus, empty states)
+// ---------------------------------------------------------------------------------------------
+
+/** Standard screen header: optional back button, one-line title that shrinks for long names, subtitle, actions. */
+@Composable
+fun ScreenHeader(
+    title: String,
+    subtitle: String?,
+    onBack: (() -> Unit)?,
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    val base = MaterialTheme.typography.headlineLarge
+    val size = if (title.length > 14) base.fontSize * 0.78f else base.fontSize
+    Row(
+        Modifier.fillMaxWidth().padding(start = if (onBack == null) 20.dp else 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (onBack != null) {
+            RoundIconButton(onClick = onBack) {
+                androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, "Back")
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = base.copy(fontSize = size, lineHeight = size * 1.15f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+        actions()
+    }
+}
+
+/** Rounded, softly bordered popup menu used everywhere instead of the plain default. */
+@Composable
+fun ThemedMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    val p = LocalPalette.current
+    androidx.compose.material3.DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = p.cardHigh,
+        tonalElevation = 0.dp,
+        shadowElevation = 14.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, p.text.copy(alpha = 0.08f)),
+        content = content,
+    )
+}
+
+@Composable
+fun MenuRow(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    val p = LocalPalette.current
+    androidx.compose.material3.DropdownMenuItem(
+        text = { Text(text, style = MaterialTheme.typography.bodyLarge, color = p.text) },
+        leadingIcon = if (icon != null) {
+            { androidx.compose.material3.Icon(icon, null, tint = p.muted, modifier = Modifier.size(20.dp)) }
+        } else null,
+        onClick = onClick,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 6.dp),
+    )
+}
+
+/** A small stacked-photos illustration with a title, tinted by the current theme. */
+@Composable
+fun EmptyState(title: String, subtitle: String? = null, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    Column(modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        androidx.compose.foundation.Canvas(Modifier.size(width = 150.dp, height = 116.dp)) {
+            val w = size.width
+            val h = size.height
+            val corner = androidx.compose.ui.geometry.CornerRadius(22.dp.toPx())
+            val cardSize = androidx.compose.ui.geometry.Size(w * 0.62f, h * 0.78f)
+            val topLeft = androidx.compose.ui.geometry.Offset((w - cardSize.width) / 2f, (h - cardSize.height) / 2f)
+            rotate(-10f, center) {
+                drawRoundRect(p.cardHigh, topLeft, cardSize, corner)
+            }
+            rotate(9f, center) {
+                drawRoundRect(p.accent.copy(alpha = 0.35f), topLeft, cardSize, corner)
+            }
+            drawRoundRect(p.card, topLeft, cardSize, corner)
+            drawRoundRect(
+                p.text.copy(alpha = 0.12f), topLeft, cardSize, corner,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx()),
+            )
+            // sun + hills
+            drawCircle(p.accent, radius = cardSize.width * 0.09f, center = androidx.compose.ui.geometry.Offset(topLeft.x + cardSize.width * 0.7f, topLeft.y + cardSize.height * 0.3f))
+            val hills = androidx.compose.ui.graphics.Path().apply {
+                moveTo(topLeft.x, topLeft.y + cardSize.height)
+                lineTo(topLeft.x, topLeft.y + cardSize.height * 0.78f)
+                lineTo(topLeft.x + cardSize.width * 0.34f, topLeft.y + cardSize.height * 0.52f)
+                lineTo(topLeft.x + cardSize.width * 0.6f, topLeft.y + cardSize.height * 0.72f)
+                lineTo(topLeft.x + cardSize.width * 0.78f, topLeft.y + cardSize.height * 0.6f)
+                lineTo(topLeft.x + cardSize.width, topLeft.y + cardSize.height * 0.8f)
+                lineTo(topLeft.x + cardSize.width, topLeft.y + cardSize.height)
+                close()
+            }
+            clipRect(topLeft.x, topLeft.y, topLeft.x + cardSize.width, topLeft.y + cardSize.height) {
+                drawPath(hills, p.accent.copy(alpha = 0.55f))
+            }
+        }
+        Text(title, modifier = Modifier.padding(top = 14.dp), style = MaterialTheme.typography.titleMedium)
+        if (subtitle != null) {
+            Text(subtitle, color = p.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}

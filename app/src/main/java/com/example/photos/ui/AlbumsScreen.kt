@@ -3,6 +3,21 @@
 package com.example.photos.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
+import com.example.photos.ui.theme.CardStyle
+import com.example.photos.ui.theme.LocalPalette
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -94,53 +109,24 @@ fun AlbumsScreen(vm: GalleryViewModel) {
     val bottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 96.dp
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Albums",
-                    style = MaterialTheme.typography.headlineLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    "${albums.size} albums",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        ScreenHeader(title = "Albums", subtitle = "${albums.size} albums", onBack = null) {
             RoundIconButton(onClick = { vm.open(Screen.Search) }) { Icon(Icons.Filled.Search, "Search") }
             RoundIconButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, "New album") }
             Box {
                 RoundIconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, "More") }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                ThemedMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
                     AlbumSort.entries.forEach { s ->
-                        DropdownMenuItem(
-                            text = { Text((if (sort == s) "✓  " else "     ") + "Sort: " + s.label) },
-                            onClick = { menuOpen = false; vm.setAlbumSort(s) },
-                        )
+                        MenuRow((if (sort == s) "✓  " else "") + "Sort: " + s.label) { menuOpen = false; vm.setAlbumSort(s) }
                     }
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text("Reorder albums") },
-                        onClick = {
-                            menuOpen = false
-                            working.clear()
-                            working.addAll(rest)
-                            reorder = true
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Find duplicates") },
-                        onClick = { menuOpen = false; vm.open(Screen.Duplicates) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Appearance…") },
-                        onClick = { menuOpen = false; showTheme = true },
-                    )
+                    HorizontalDivider(color = LocalPalette.current.text.copy(alpha = 0.08f))
+                    MenuRow("Reorder albums", Icons.Outlined.SwapVert) {
+                        menuOpen = false
+                        working.clear()
+                        working.addAll(rest)
+                        reorder = true
+                    }
+                    MenuRow("Find duplicates", Icons.Outlined.ContentCopy) { menuOpen = false; vm.open(Screen.Duplicates) }
+                    MenuRow("Appearance…", Icons.Outlined.Palette) { menuOpen = false; showTheme = true }
                 }
             }
         }
@@ -351,62 +337,114 @@ private fun AlbumCardWithMenu(
             onClick = { if (!reorder) onOpen() },
             onLongClick = { if (!reorder && hasMenu) onMenu(src.id) },
         )
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenu(null) }) {
+        ThemedMenu(expanded = menuOpen, onDismiss = { onMenu(null) }) {
             if (src is Source.Custom) {
-                DropdownMenuItem(text = { Text("Rename") }, onClick = { onMenu(null); onRename() })
-                DropdownMenuItem(text = { Text("Delete album") }, onClick = { onMenu(null); onDelete() })
+                MenuRow("Rename", Icons.Outlined.Edit) { onMenu(null); onRename() }
+                MenuRow("Delete album", Icons.Outlined.Delete) { onMenu(null); onDelete() }
             }
             if (src.supportsCover) {
-                DropdownMenuItem(
-                    text = { Text(if (hasCover) "Change cover" else "Set cover") },
-                    onClick = { onMenu(null); onCover() },
-                )
+                MenuRow(if (hasCover) "Change cover" else "Set cover", Icons.Outlined.Image) { onMenu(null); onCover() }
             }
             if (src is Source.Folder) {
-                DropdownMenuItem(text = { Text("Hide folder") }, onClick = { onMenu(null); onHide() })
+                MenuRow("Hide folder", Icons.Outlined.VisibilityOff) { onMenu(null); onHide() }
             }
         }
     }
 }
 
 @Composable
+private fun CoverOrIcon(info: AlbumInfo, modifier: Modifier) {
+    val cover = info.cover
+    if (cover != null) {
+        MediaThumbnail(cover, 480, modifier)
+    } else {
+        Box(modifier.background(CardColorHigh), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.PhotoLibrary, null, tint = LocalPalette.current.muted)
+        }
+    }
+}
+
+private fun relativeAge(ms: Long): String {
+    if (ms <= 0) return ""
+    val d = (System.currentTimeMillis() - ms) / 86_400_000L
+    return when {
+        d < 1 -> "today"
+        d < 30 -> "$d day" + if (d == 1L) "" else "s"
+        d < 365 -> "${d / 30} mo"
+        else -> "${d / 365} yr"
+    }
+}
+
+/** Three card designs, one per theme (image + overlay, white classic card, white badge card). */
+@Composable
 private fun AlbumCard(info: AlbumInfo, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column(
-        Modifier
-            .clip(RoundedCornerShape(26.dp))
-            .background(CardColor)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(CardColorHigh),
-            contentAlignment = Alignment.Center,
+    val p = LocalPalette.current
+    val click = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    when (p.cardStyle) {
+        CardStyle.OVERLAY -> Box(
+            Modifier.fillMaxWidth().aspectRatio(0.86f).clip(RoundedCornerShape(28.dp)).background(p.card).then(click),
         ) {
-            val cover = info.cover
-            if (cover != null) {
-                MediaThumbnail(cover, 400, Modifier.fillMaxSize())
-            } else {
-                Icon(Icons.Outlined.PhotoLibrary, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            CoverOrIcon(info, Modifier.fillMaxSize())
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        0.45f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.78f),
+                    ),
+                ),
+            )
+            Box(
+                Modifier.align(Alignment.TopStart).padding(12.dp).size(34.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.38f)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Outlined.PhotoLibrary, null, tint = Color.White, modifier = Modifier.size(18.dp)) }
+            Column(Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+                Text(info.title, color = Color.White, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${info.count} items", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
             }
         }
-        Text(
-            info.title,
-            modifier = Modifier.padding(top = 10.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            "${info.count}",
-            modifier = Modifier.padding(bottom = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        CardStyle.CLASSIC -> Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp)).background(p.cardHigh).then(click).padding(8.dp),
+        ) {
+            Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(24.dp))) {
+                CoverOrIcon(info, Modifier.fillMaxSize())
+                if (info.source == Source.Favorites) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).padding(10.dp).size(34.dp).clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.28f)),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.Favorite, null, tint = Color.White, modifier = Modifier.size(18.dp)) }
+                }
+            }
+            Column(Modifier.padding(horizontal = 8.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(info.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${info.count} files" + relativeAge(info.latest).let { if (it.isEmpty()) "" else "  ·  $it" },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = p.muted,
+                )
+            }
+        }
+        CardStyle.BADGE -> Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp)).background(Color.White).then(click).padding(10.dp),
+        ) {
+            Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    info.title,
+                    modifier = Modifier.weight(1f),
+                    color = Color(0xFF1A1214),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Box(Modifier.size(30.dp).clip(CircleShape).background(Color(0xFF14090C)), contentAlignment = Alignment.Center) {
+                    Text("${info.count}", color = Color.White, fontSize = 11.sp, maxLines = 1)
+                }
+            }
+            Box(Modifier.padding(top = 8.dp).fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(24.dp))) {
+                CoverOrIcon(info, Modifier.fillMaxSize())
+            }
+        }
     }
 }
 
